@@ -77,7 +77,7 @@ class RainOverlay:
         for _ in range(RAIN_DROP_COUNT):
             self._new_drop(random_y=True)
 
-        self.last_time = time.time()
+        self.last_time = time.perf_counter()
         self._draw()
 
     def _new_drop(self, random_y=False):
@@ -86,13 +86,41 @@ class RainOverlay:
         x      = random.uniform(-50, self.screen_w + 50)
         y      = random.uniform(-self.screen_h, 0) if random_y else random.uniform(-100, -10)
         color  = random.choice(["#A8D8FF", "#C0E8FF", "#7EC8FF", "#FFFFFF"])
-        self.drops.append({"x": x, "y": y, "speed": speed, "length": length, "color": color})
+        drop = {
+            "x": x,
+            "y": y,
+            "speed": speed,
+            "length": length,
+            "color": color,
+            "width": 2 if speed >= 650 else 1,
+        }
+        drop["item"] = self.canvas.create_line(
+            x,
+            y,
+            x - length * self.dx_per_dy,
+            y - length,
+            fill=color,
+            width=drop["width"],
+            tags="rain",
+        )
+        self.drops.append(drop)
+
+    def _respawn_drop(self, drop):
+        drop["speed"] = random.uniform(*RAIN_SPEED_RANGE)
+        drop["length"] = random.randint(*RAIN_LENGTH_RANGE)
+        drop["x"] = random.uniform(-50, self.screen_w + 50)
+        drop["y"] = random.uniform(-100, -10)
+        drop["color"] = random.choice(["#A8D8FF", "#C0E8FF", "#7EC8FF", "#FFFFFF"])
+        drop["width"] = 2 if drop["speed"] >= 650 else 1
+        self.canvas.itemconfigure(
+            drop["item"], fill=drop["color"], width=drop["width"]
+        )
 
     def stop(self):
         self.active = False
 
     def _draw(self):
-        now = time.time()
+        now = time.perf_counter()
         dt  = now - self.last_time
         self.last_time = now
 
@@ -104,8 +132,6 @@ class RainOverlay:
                 pass
             return
 
-        self.canvas.delete("rain")
-
         for drop in self.drops:
             drop["y"] += drop["speed"] * dt
             drop["x"] += drop["speed"] * dt * self.dx_per_dy
@@ -114,15 +140,12 @@ class RainOverlay:
             x2 = x1 - drop["length"] * self.dx_per_dy
             y2 = y1 - drop["length"]
 
-            if drop["y"] < self.screen_h + 50:
-                self.canvas.create_line(x1, y1, x2, y2,
-                                        fill=drop["color"], width=1, tags="rain")
-            else:
-                drop["x"]      = random.uniform(-50, self.screen_w + 50)
-                drop["y"]      = random.uniform(-100, -10)
-                drop["speed"]  = random.uniform(*RAIN_SPEED_RANGE)
-                drop["length"] = random.randint(*RAIN_LENGTH_RANGE)
-                drop["color"]  = random.choice(["#A8D8FF", "#C0E8FF", "#7EC8FF", "#FFFFFF"])
+            if y1 >= self.screen_h + 50:
+                self._respawn_drop(drop)
+                x1, y1 = drop["x"], drop["y"]
+                x2 = x1 - drop["length"] * self.dx_per_dy
+                y2 = y1 - drop["length"]
+            self.canvas.coords(drop["item"], x1, y1, x2, y2)
 
         self.win.after(16, self._draw)
 
@@ -183,17 +206,18 @@ class LightningBolt:
             self.canvas.create_line(bpts, fill="#FFFFFF", width=1, smooth=False)
 
         self._fade_step = 0
+        self._fade_frames = 15
         self._fade()
 
     def _fade(self):
         self._fade_step += 1
-        alpha = max(0.0, 0.95 - self._fade_step * 0.15)
+        alpha = max(0.0, 0.95 * (1 - self._fade_step / self._fade_frames))
         try:
             self.win.attributes("-alpha", alpha)
         except tk.TclError:
-            return
-        if alpha > 0:
-            self.win.after(40, self._fade)
+            pass
+        if self._fade_step < self._fade_frames:
+            self.win.after(16, self._fade)
         else:
             try:
                 self.win.destroy()
@@ -324,12 +348,12 @@ class LyricFloatApp:
         return max(box.y for box in self.boxes) + BOX_H + STACK_SPACING
 
     def start(self):
-        self.start_time      = time.time()
+        self.start_time      = time.perf_counter()
         self.last_frame_time = self.start_time
         self.tick()
 
     def tick(self):
-        now     = time.time()
+        now     = time.perf_counter()
         elapsed = now - self.start_time
         dt      = now - self.last_frame_time
         self.last_frame_time = now
